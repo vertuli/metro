@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: metro
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Runtime: python3.8
+    Timeout: 3
+    Environment:
+      Variables:
+        PATHS_TABLE_NAME: !Ref PathsTable  # TODO: Get the DynamoDB table name here for boto3.
+        ACTIVE_VEHICLES_INDEX: active-index # TODO: Reference the DynamoDB table's GSI.
+        LAMETRO_API_URL: https://api.metro.net/agencies/lametro/vehicles/
+        STALE_EVENT_THRESHOLD_SEC: 60
+        STALE_PATH_THRESHOLD_SEC: 600
+
+Resources:
+  UpdatePathsFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: update_paths/
+      Handler: update_paths.lambda_handler
+      Runtime: python3.8
+      Events:
+        UpdatePaths:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /update_paths
+            Method: get
+  ReadGeojsonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: read_geojson/
+      Handler: read_geojson.lambda_handler
+      Runtime: python3.8
+      Events:
+        ReadGeojson:
+          Type: Api
+          Properties:
+            Path: /read_geojson
+            Method: get
+  PathsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      GlobalSecondaryIndexes:
+        IndexName: active-index
+        KeySchema:
+          - AttributeName: active_vehicle_id
+            KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+        ProvisionedThroughput:
+          ReadCapacityUnits: 25
+          WriteCapacityUnits: 25
+      ProvisionedThroughput:
+        WriteCapacityUnits: 25
+        ReadCapacityUnits: 25
+      AttributeDefinitions:
+       - AttributeName: route_id
+         AttributeType: S
+       - AttributeName: start_ts
+         AttributeType: N
+       - AttributeName: active_vehicle_id
+         AttributeType: S
+       - AttributeName: vehicle_id
+         AttributeType: S
+       - AttributeName: run_id
+         AttributeType: S
+       - AttributeName: last_ts
+         AttributeType: N
+      KeySchema:
+       - AttributeName: route_id
+         KeyType: HASH
+       - AttributeName: start_ts
+         KeyType: RANGE
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  UpdatePathsApi:
+    Description: "API Gateway endpoint URL for Prod stage for UpdatePaths function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/update_paths/"
+  UpdatePathsFunction:
+    Description: "UpdatePaths Lambda Function ARN"
+    Value: !GetAtt UpdatePathsFunction.Arn
+  UpdatePathsFunctionIamRole:
+    Description: "Implicit IAM Role created for UpdatePaths function"
+    Value: !GetAtt UpdatePathsFunctionRole.Arn
+  ReadGeojsonApi:
+    Description: "API Gateway endpoint URL for Prod stage for ReadGeojson function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/read_geojson/"
+  ReadGeojsonFunction:
+    Description: "ReadGeojson Lambda Function ARN"
+    Value: !GetAtt ReadGeojsonFunction.Arn
+  ReadGeojsonFunctionIamRole:
+    Description: "Implicit IAM Role created for ReadGeojson function"
+    Value: !GetAtt ReadGeojsonFunctionRole.Arn
