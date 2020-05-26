@@ -1,99 +1,163 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: metro
-
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Description: Aggregates LA Metro's vehicle pings into a historical database of paths retrievable as GeoJSON features.
 Globals:
   Function:
     Runtime: python3.8
-    Timeout: 3
+    Timeout: 30
     Environment:
       Variables:
-        PATHS_TABLE_NAME: !Ref PathsTable  # TODO: Get the DynamoDB table name here for boto3.
-        ACTIVE_VEHICLES_INDEX: active-index # TODO: Reference the DynamoDB table's GSI.
-        LAMETRO_API_URL: https://api.metro.net/agencies/lametro/vehicles/
-        STALE_EVENT_THRESHOLD_SEC: 60
-        STALE_PATH_THRESHOLD_SEC: 600
-
+        TABLE_NAME: !Ref Table
+        LAMETRO_API_BASE_URL: http://api.metro.net
+        ACTIVE_PATH_TIMEOUT_SEC: 600
+        PING_REFRESH_RATE_SEC: 60
+        PYTHONWARNINGS: ignore  # Suppress JMESPath syntax warning: https://github.com/jmespath/jmespath.py/issues/187
 Resources:
   UpdatePathsFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Type: AWS::Serverless::Function
     Properties:
       CodeUri: update_paths/
-      Handler: update_paths.lambda_handler
-      Runtime: python3.8
       Events:
-        UpdatePaths:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+        UpdateLametroPathsSchedule:
+          Type: Schedule
           Properties:
-            Path: /update_paths
+            Input: '{"pathParameters": {"agency_id": "lametro"}}'
+            Schedule: rate(1 minute)
+            Enabled: True
+        UpdateLametrorailPathsSchedule:
+          Type: Schedule
+          Properties:
+            Input: '{"pathParameters": {"agency_id": "lametro-rail"}}'
+            Schedule: rate(1 minute)
+            Enabled: True
+        UpdatePathsApi:
+          Type: Api
+          Properties:
+            Path: /update_paths/{agency_id}
             Method: get
+            RestApiId: !Ref MetroApi
+      Handler: update_paths.lambda_handler
+      Policies:
+        - AmazonDynamoDBFullAccess  # TODO: Limit role permissions
+  UpdateRoutesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: update_routes/
+      Events:
+        UpdateLametroRoutesSchedule:
+          Type: Schedule
+          Properties:
+            Input: '{"pathParameters": {"agency_id": "lametro"}}'
+            Schedule: rate(1 day)
+            Enabled: True
+        UpdateLametrorailRoutesSchedule:
+          Type: Schedule
+          Properties:
+            Input: '{"pathParameters": {"agency_id": "lametro-rail"}}'
+            Schedule: rate(1 day)
+            Enabled: True
+        UpdateRoutesApi:
+          Type: Api
+          Properties:
+            Path: /update_routes/{agency_id}
+            Method: get
+            RestApiId: !Ref MetroApi
+      Handler: update_routes.lambda_handler
+      Policies:
+        - AmazonDynamoDBFullAccess
   ReadGeojsonFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: read_geojson/
-      Handler: read_geojson.lambda_handler
-      Runtime: python3.8
-      Events:
-        ReadGeojson:
+      Events: # TODO: Collapse into single event
+        ReadActivePathsApi:
           Type: Api
           Properties:
-            Path: /read_geojson
+            Path: /read_geojson/{agency_id}
             Method: get
-  PathsTable:
+            RestApiId: !Ref MetroApi
+        ReadAllPathsIsoDate:
+          Type: Api
+          Properties:
+            Path: /read_geojson/{agency_id}/{iso_date}
+            Method: get
+            RestApiId: !Ref MetroApi
+        ReadGeojsonApi:  # TODO: Configure credentials for API access
+          Type: Api
+          Properties:
+            Path: /read_geojson/{agency_id}/{iso_date}/{route_id}
+            Method: get
+            RestApiId: !Ref MetroApi
+      Handler: read_geojson.lambda_handler
+      Policies:
+        - AmazonDynamoDBFullAccess  # TODO: Limit role permissions
+  Table:
     Type: AWS::DynamoDB::Table
     Properties:
-      GlobalSecondaryIndexes:
-        IndexName: active-index
-        KeySchema:
-          - AttributeName: active_vehicle_id
-            KeyType: HASH
-        Projection:
-          ProjectionType: ALL
-        ProvisionedThroughput:
-          ReadCapacityUnits: 25
-          WriteCapacityUnits: 25
-      ProvisionedThroughput:
-        WriteCapacityUnits: 25
-        ReadCapacityUnits: 25
       AttributeDefinitions:
-       - AttributeName: route_id
-         AttributeType: S
-       - AttributeName: start_ts
-         AttributeType: N
-       - AttributeName: active_vehicle_id
-         AttributeType: S
-       - AttributeName: vehicle_id
-         AttributeType: S
-       - AttributeName: run_id
-         AttributeType: S
-       - AttributeName: last_ts
-         AttributeType: N
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
       KeySchema:
-       - AttributeName: route_id
-         KeyType: HASH
-       - AttributeName: start_ts
-         KeyType: RANGE
-
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 50
+        WriteCapacityUnits: 50
+  TableWriteCapacityScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 50
+      MinCapacity: 5
+      ResourceId: !Sub table/${Table}
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/dynamodb.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_DynamoDBTable
+      ScalableDimension: dynamodb:table:WriteCapacityUnits
+      ServiceNamespace: dynamodb
+  TableWriteScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: WriteAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref TableWriteCapacityScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 3600
+        ScaleOutCooldown: 3600
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBWriteCapacityUtilization
+  TableReadCapacityScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 50
+      MinCapacity: 5
+      ResourceId: !Sub table/${Table}
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/dynamodb.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_DynamoDBTable
+      ScalableDimension: dynamodb:table:ReadCapacityUnits
+      ServiceNamespace: dynamodb
+  TableReadScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ReadAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref TableReadCapacityScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 3600
+        ScaleOutCooldown: 3600
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBReadCapacityUtilization
+  MetroApi:  # TODO: Look into Swagger definition
+    Type: AWS::Serverless::Api  # TODO: Configure authorizer for API access
+    Properties:
+      Domain:
+        CertificateArn: arn:aws:acm:us-west-2:463621350424:certificate/7793d316-b555-450b-8afb-d8ab29ee79bd
+        DomainName: metro.vertuli.com
+      OpenApiVersion: 3.0.3
+      StageName: prod
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  UpdatePathsApi:
-    Description: "API Gateway endpoint URL for Prod stage for UpdatePaths function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/update_paths/"
-  UpdatePathsFunction:
-    Description: "UpdatePaths Lambda Function ARN"
-    Value: !GetAtt UpdatePathsFunction.Arn
-  UpdatePathsFunctionIamRole:
-    Description: "Implicit IAM Role created for UpdatePaths function"
-    Value: !GetAtt UpdatePathsFunctionRole.Arn
-  ReadGeojsonApi:
-    Description: "API Gateway endpoint URL for Prod stage for ReadGeojson function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/read_geojson/"
-  ReadGeojsonFunction:
-    Description: "ReadGeojson Lambda Function ARN"
-    Value: !GetAtt ReadGeojsonFunction.Arn
-  ReadGeojsonFunctionIamRole:
-    Description: "Implicit IAM Role created for ReadGeojson function"
-    Value: !GetAtt ReadGeojsonFunctionRole.Arn
+  Table:
+    Description: "Holds aggregations of collected pings as Paths"
+    Value: !GetAtt Table.Arn
