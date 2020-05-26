@@ -10,3 +10,8 @@ Using [AWS's Serverless Application Model (SAM) framework](https://aws.amazon.co
 ![Animated map of LA Metro Buses](kepler.gif)
 
 The output GeoJSON can be saved as a file and fed directly into [kepler.gl](http://kepler.gl/demo) for animated path visualization.
+
+
+## Testing
+
+`python -m pytest`

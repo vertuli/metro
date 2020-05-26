@@ -3,9 +3,7 @@ version = 0.1
 [default.deploy]
 [default.deploy.parameters]
 stack_name = "metro"
-s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-4sq6mlspgsya"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1vguxzz4gd7cc"
 s3_prefix = "metro"
 region = "us-west-2"
-confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-
