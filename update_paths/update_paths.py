@@ -114,6 +114,7 @@ def get_pings(agency_id: str) -> Dict[str, dict]:
     return pings
 
 
+# TODO: Use Lambda Layers to share this code between functions.
 def get_lametro_api_items(agency_id: str) -> List[dict]:
     url = f"{LAMETRO_API_BASE_URL}/agencies/{agency_id}/vehicles/"
     try:

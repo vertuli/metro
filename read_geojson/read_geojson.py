@@ -13,6 +13,7 @@ TABLE_NAME = os.getenv("TABLE_NAME")
 table = boto3.resource("dynamodb").Table(name=TABLE_NAME)
 
 
+# TODO: Split into three separate functions using code shared with Lambda Layers.
 def lambda_handler(event: dict, context) -> dict:
     agency_id, iso_date, route_id = parse_event(event)
     if not iso_date:
