@@ -1,4 +1,4 @@
-package metro
+package metro.paths
 
 import utest.{test, Tests, TestSuite}
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
@@ -25,9 +25,7 @@ object ExampleTests extends TestSuite {
 			
 		val actualDf = sourceDf.transform(Example.withGreeting())
 
-		val tests = Tests {
-			test("Same Schema"){ expectedDf.schema.equals(actualDf.schema) }
-			test("Same Elements") { expectedDf.collect.sameElements(actualDf.collect) }
-		}
+		test("Same Schema"){ expectedDf.schema.equals(actualDf.schema) }
+		test("Same Elements") { expectedDf.collect.sameElements(actualDf.collect) }
 	}
 }
