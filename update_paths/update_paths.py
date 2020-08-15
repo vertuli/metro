@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-import requests
 import logging
 import boto3
 import json
@@ -42,11 +41,16 @@ def update_paths(pings: List[dict]) -> list:
     responses = []
     pings = sorted(pings, key=lambda p: p["agency_id"])
     for agency_id, group in groupby(pings, key=lambda p: p["agency_id"]):
-        paths = get_active_paths(agency_id)
-        active_paths, completed_paths = append_pings(group, paths)
-        r = write(active_paths, completed_paths, agency_id)
+        r = update_agency_paths(group, agency_id)
         responses.append(r)
     return responses
+
+
+def update_agency_paths(pings: List[dict], agency_id: str) -> list:
+    paths = get_active_paths(agency_id)
+    active_paths, completed_paths = append_pings(pings, paths)
+    r = write(active_paths, completed_paths, agency_id)
+    return r
 
 
 def write(
@@ -68,10 +72,19 @@ def write(
         responses.append(r)
     return responses
 
+"""
+table.update_item(
+    Key={"pk": f"{agency_id}${route_id}", "sk": f"paths${local_iso_date}"},
+    UpdateExpression="SET #vehicle_id_paths = list_append(:coord, if_not_exists(#vehicle_id_paths, :empty_list))",
+    ExpressionAttributeNames={"#vehicle_id_paths": f"paths${vehicle_id}"}, 
+    ExpressionAttributeValues={":empty_list": list(), ":coord": [[lng, lat, 0, ts]]},
+)
+"""
 
 def append_pings(
     pings: Dict[str, dict], paths: Dict[str, dict]
 ) -> (Dict[str, dict], Dict[Tuple[str, str], List[dict]]):
+
     active_paths, inactive_paths = dict(), dict()
     now = int(datetime.now(tz=timezone.utc).timestamp())
 
