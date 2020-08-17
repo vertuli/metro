@@ -26,7 +26,8 @@ object metro extends ScalaModule {
 			MavenRepository("http://dl.bintray.com/spark-packages/maven")
 		)
 		def ivyDeps = Agg(
-			ivy"org.apache.spark::spark-sql:3.0.0"
+			ivy"org.apache.spark::spark-sql:3.0.0",
+			ivy"com.lihaoyi::os-lib:0.7.1"
 		)
 		object test extends Tests {
 			def ivyDeps = Agg(
