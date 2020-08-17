@@ -16,8 +16,6 @@ object PathsBuilderTests extends TestSuite with TestSpark {
 	
 	val tests = Tests {
 		import spark.implicits._
-		val query = PathsBuilder.startPathsStream
-		test("Paths stream is active"){ query.isActive }  // FIXME: Figure out a proper test
-		query.stop()
+		// FIXME: Figure out proper tests
 	}
 }

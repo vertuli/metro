@@ -4,3 +4,5 @@ __pycache__/
 .aws-sam
 out/
 data/
+*.log
+metastore_db/
