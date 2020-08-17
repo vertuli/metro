@@ -16,7 +16,8 @@ object PathsBuilderTests extends TestSuite with TestSpark {
 	
 	val tests = Tests {
 		import spark.implicits._
-		val pingsDs = PathsBuilder.readPings
-		test("Non-zero counts"){ pingsDs.count > 0 }
+		val query = PathsBuilder.startPathsStream
+		test("Paths stream is active"){ query.isActive }  // FIXME: Figure out a proper test
+		query.stop()
 	}
 }
