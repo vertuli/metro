@@ -51,14 +51,24 @@ object PathsBuilder extends Spark {
 	val pingsBasePath = os.pwd / "data" / "pings"
 	val pathsBasePath = os.pwd / "data" / "paths"
 	val pathsCheckpointPath = os.pwd / "data" / "checkpoints" / "paths"
-	val minTimestamp = java.sql.Timestamp.from(java.time.Instant.ofEpochSecond(0))
 
 	def main(args: Array[String]): Unit = {
-		val query = startPathsStream
-		query.awaitTermination()
+		import spark.implicits._
+		val pathsQuery = getPingStream
+			.groupByKey(p => Key(p.id, p.agency_id, p.route_id, p.run_id))
+			.flatMapGroupsWithState(OutputMode.Append, GroupStateTimeout.NoTimeout)(updatePath)
+			.writeStream
+			.partitionBy("agency_id", "local_date")
+			.format("json")
+			.outputMode("append")
+			.option("path", pathsBasePath.toString)
+			.option("checkpointLocation", pathsCheckpointPath.toString)
+			.start()
+
+		pathsQuery.awaitTermination()
 	}
 
-	def startPathsStream(implicit spark: SparkSession): StreamingQuery = {
+	def getPingStream(implicit spark: SparkSession): Dataset[Ping] = {
 		import spark.implicits._
 		spark
 			.readStream
@@ -68,16 +78,6 @@ object PathsBuilder extends Spark {
 			.withWatermark("event_ts", "5 seconds")
 			.dropDuplicates("id", "agency_id", "route_id", "run_id", "event_ts")
 			.as[Ping]
-			.groupByKey(p => Key(p.id, p.agency_id, p.route_id, p.run_id))
-			.flatMapGroupsWithState(OutputMode.Append, GroupStateTimeout.NoTimeout)(updatePath)
-			.writeStream
-			.partitionBy("agency_id", "local_date")
-			.queryName("paths")
-			.format("json")
-			.outputMode("append")
-			.option("path", pathsBasePath.toString)
-			.option("checkpointLocation", pathsCheckpointPath.toString)
-			.start()
 	}
 
 	def updatePath(key: Key, pings: Iterator[Ping], state: GroupState[Path]): Iterator[Path] = {
