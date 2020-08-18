@@ -35,6 +35,14 @@ object metro extends ScalaModule {
 			)
 			def testFrameworks = Seq("utest.runner.Framework")
 		}
+		object geojson extends ScalaModule {
+			def scalaVersion = "2.12.12"
+			def ivyDeps = Agg(
+				ivy"org.apache.spark::spark-sql:3.0.0",
+				ivy"com.lihaoyi::os-lib:0.7.1",
+				ivy"com.lihaoyi::upickle:0.9.5"
+			)
+		}
 	}
 }
 
