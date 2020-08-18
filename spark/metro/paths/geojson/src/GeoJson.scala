@@ -3,6 +3,9 @@ package metro.paths.geojson
 import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.ScalaReflection
+import java.time.LocalDateTime
+import java.time.ZoneOffset.UTC
+import ujson.{Arr, Num, Str, Obj, write}
 
 case class Coordinate(
 	lng: Double,
@@ -30,51 +33,54 @@ trait Spark {
 		.getOrCreate()
 }
 
-case class Key(agency_id: String, local_date: String)
-
-case class Feature(`type`: String = "Feature", geometry: Geometry, properties: Properties)
-
-case class Geometry(`type`: String = "LineString", coordinates: Seq[(Double, Double, Double, Int)])
-
-case class Properties(id: String, agency_id: String, local_date: String, route_id: String, run_id: String)
-
-case class FeatureCollection(`type`: String = "FeatureCollection", features: Seq[Feature])
-
 object GeoJson extends Spark {
 	val pathsBasePath = os.pwd / "data" / "paths"
-	val geoJsonBasePath = os.pwd / "data" / "geojson"
+	val pathsGeojsonBasePath = os.pwd / "data" / "geojson"
 
 	def main(args: Array[String]): Unit = {
+		val (agency_id, local_date, id, route_id) = ("lametro", "2020-08-17", None, None)  // TODO: Rm tmp test args, use Scallop
+		val pathsDs = readPaths(agency_id, local_date, id, route_id)
+		val fc = makeFeatureCollection(pathsDs.collect)
+    val fileName = Seq(agency_id, local_date, id.getOrElse("ALL"), route_id.getOrElse("ALL")).mkString("_") + ".geojson"	
+		os.write.over(pathsGeojsonBasePath / fileName, ujson.write(fc), createFolders=true)
+	}
+
+	def readPaths(
+		agency_id: String, local_date: String, id: Option[String] = None, route_id: Option[String] = None
+	)(implicit spark: SparkSession): Dataset[Path] = {
 		import spark.implicits._
-		val pathsDs = spark
+		spark
 			.read
 			.schema(ScalaReflection.schemaFor[Path].dataType.asInstanceOf[StructType])
 			.json(pathsBasePath.toString)
 			.as[Path]
-			.groupByKey(p => Key(p.agency_id, p.local_date))
-			.mapGroups(makeFeatureCollection)
-			.foreach(writeGeoJson) // FIXME: Have foreach() call this method properly
+			.filter(p => 
+				p.agency_id == agency_id && 
+				p.local_date == local_date && 
+				id.getOrElse(p.id) == p.id && 
+				route_id.getOrElse(p.route_id) == p.route_id
+			)
 	}
 
-	def makeFeatureCollection(key: Key, paths: Iterator[Path]): FeatureCollection = {
-		FeatureCollection(features=paths.map(makeFeature).toSeq)
+	def makeFeatureCollection(paths: Seq[Path]): Obj = {
+		Obj(
+			"type" -> "FeatureCollection",
+			"features" -> Arr(paths.map(makeFeature):_*)
+		)
 	}
 
-	def makeFeature(path: Path): Feature = Feature(
-		geometry=Geometry(coordinates=path.coordinates.map(c => (c.lng, c.lat, c.alt, c.ts.toInt))), 
-		properties=Properties(
-			id=path.id,
-			agency_id=path.agency_id,
-			local_date=path.local_date,
-			route_id=path.route_id,
-			run_id=path.run_id.getOrElse("NONE")
+	def makeFeature(path: Path): Obj = Obj(
+		"type" -> "Feature",
+		"geometry" -> Obj(
+			"type" -> "LineString",
+			"coordinates" -> Arr(path.coordinates.map(c => Arr(Num(c.lng), Num(c.lat), Num(c.alt), Num(c.ts.toInt))):_*)
+		),
+		"properties" -> Obj(
+			"id" -> Str(path.id),
+			"agency_id" -> Str(path.agency_id),
+			"local_date" -> Str(path.local_date),
+			"route_id" -> Str(path.route_id),
+			"run_id" -> Str(path.run_id.getOrElse("NONE"))
 		)
 	)
-
-	def writeGeoJson(fc: FeatureCollection): Unit = {
-		val agency_id = fc.features.head.properties.agency_id
-		val local_date = fc.features.head.properties.local_date
-		// FIXME: Serialize the FeatureCollection case class to JSON
-		os.write(os.pwd / s"${agency_id}_${local_date}_paths.geojson", ujson.write(fc, indent=4), createFolders=true)
-	}
 }
