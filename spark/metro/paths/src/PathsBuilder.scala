@@ -78,6 +78,7 @@ object PathsBuilder extends Spark {
 			.withWatermark("event_ts", "5 seconds")
 			.dropDuplicates("id", "agency_id", "route_id", "run_id", "event_ts")
 			.as[Ping]
+			.filter(p => p.longitude != 0 && p.latitude != 0)  // filters weird (0, 0) pings from la metro
 	}
 
 	def updatePath(key: Key, pings: Iterator[Ping], state: GroupState[Path]): Iterator[Path] = {
