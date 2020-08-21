@@ -2,3 +2,7 @@
 __pycache__/
 .pytest_cache
 .aws-sam
+out/
+data/
+*.log
+metastore_db/
